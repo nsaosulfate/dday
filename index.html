@@ -308,6 +308,7 @@ footer a{ color:var(--accent); text-decoration:none; }
     </div>
     <div class="switch-row"><div class="sw-lbl">토요일도 근무</div><button class="switch" id="s-sat"></button></div>
     <div class="switch-row" style="border-top:1px solid var(--line)"><div class="sw-lbl">일요일도 근무</div><button class="switch" id="s-sun"></button></div>
+    <div class="switch-row" style="border-top:1px solid var(--line)"><div class="sw-lbl">소집해제일도 휴가에 포함 <small style="color:var(--sub);font-weight:600">(연가)</small></div><button class="switch" id="s-inclend"></button></div>
     <div class="note" style="margin-top:14px;">
       ※ <b>병가</b>는 출국 전 마지막 근무일까지 조퇴로 소진, <b>연가·특별휴가</b>는 출국일~소집해제일을 채우는 데 쓰는 것으로 계산해요. (서로 분리)<br>
       ※ 잔여는 <b>오늘 기준</b> 값. "사용 기록"에 추가하면 잔여에서 <b>자동 차감</b>됩니다.
@@ -364,7 +365,7 @@ $$(".theme-btn").forEach(b=>b.addEventListener("click",()=>setTheme(document.doc
 setTheme(document.documentElement.dataset.theme||"light");
 
 /* ════════ 설정/기록 데이터 ════════ */
-const DEF={ start:"2025-01-16", end:"2026-10-15", departure:"2026-09-22", hpd:8, sat:false, sun:false, annual:6, sick:74, special:9 };
+const DEF={ start:"2025-01-16", end:"2026-10-15", departure:"2026-09-22", hpd:8, sat:false, sun:false, annual:6, sick:74, special:9, inclEnd:true };
 function loadCfg(){ try{ return {...DEF, ...(JSON.parse(localStorage.getItem(LS_CFG))||{})}; }catch(e){ return {...DEF}; } }
 function saveCfg(){ try{ localStorage.setItem(LS_CFG, JSON.stringify(cfg)); }catch(e){} }
 let cfg=loadCfg();
@@ -422,15 +423,16 @@ function blockInfo(){
   const ann=annRemain(), spc=spcRemain(), total=ann+spc;
   const n=Math.max(0, Math.ceil(total-1e-9));
   const end=parse(cfg.end);
-  const firstLeave = workBack(end, Math.max(1,n));
-  const lastWork   = workBack(end, n+1);
-  const days=[]; let d=new Date(firstLeave); while(d<end){ if(isWork(d)) days.push(iso(d)); d=addDays(d,1); }
-  const labels={}; const annN=Math.round(ann);
-  days.forEach((is,i)=> labels[is]= i<annN ? "annual" : "special");
-  return { ann, spc, total, n, firstLeave, lastWork, days, labels };
+  const boundary = cfg.inclEnd ? addDays(end,1) : end;   // 소집해제일도 휴가에 포함하면 그 날까지 채움
+  const firstLeave = workBack(boundary, Math.max(1,n));
+  const lastWork   = workBack(boundary, n+1);
+  const days=[]; let d=new Date(firstLeave); while(d<boundary){ if(isWork(d)) days.push(iso(d)); d=addDays(d,1); }
+  const labels={}; const spcN=Math.round(spc);
+  days.forEach((is,i)=> labels[is]= i<spcN ? "special" : "annual");  // 특별휴가 먼저, 연가는 뒤(=소집해제일이 연가)
+  return { ann, spc, total, n, firstLeave, lastWork, days, labels, boundary };
 }
 function lastWorkDay(){ return blockInfo().lastWork; }
-function fixedBlockSet(){ const bi=blockInfo(), s=new Set(); let d=new Date(bi.firstLeave), end=parse(cfg.end); while(d<end){ s.add(iso(d)); d=addDays(d,1);} return s; }
+function fixedBlockSet(){ const bi=blockInfo(), s=new Set(); let d=new Date(bi.firstLeave); while(d<bi.boundary){ s.add(iso(d)); d=addDays(d,1);} return s; }
 function blockLabels(){ return blockInfo().labels; }
 
 /* 병가 시나리오 (출국 전 마지막 근무일에 끝나도록 거꾸로) */
@@ -476,7 +478,7 @@ function renderEarly(){
     <div class="kv"><span class="k">사용 휴가</span><span class="v">연가 ${fmtDays(bi.ann)} + 특별 ${fmtDays(bi.spc)} = ${fmtDays(bi.total)}</span></div>
     <div class="kv"><span class="k">✈️ 호주 출국</span><span class="v">${fmtDate(dep)} <small>(D-${dday(dep)})</small></span></div>
     <div class="note ${depInBlock?"":"warn"}">${depInBlock
-      ? `연가(${fmtDays(bi.ann)})·특별휴가(${fmtDays(bi.spc)})를 <b>전부 막판에 몰아</b> 써서 <b>${fmtDate(bi.firstLeave)}부터</b> 출근 안 하고 소집해제(${dot(end)})까지 휴가로 채워요. 출국일 <b>${fmtDate(dep)}</b>은 이 휴가구간 안이라 안전합니다(출국보다 <b>${freeBefore}근무일</b> 더 일찍 자유). 캘린더에 날짜별로 <b>연가/특별휴가</b>가 완전히 표기돼요.`
+      ? `연가(${fmtDays(bi.ann)})·특별휴가(${fmtDays(bi.spc)})를 <b>전부 막판에 몰아</b> 써서 <b>${fmtDate(bi.firstLeave)}부터</b> 출근 안 하고 소집해제일(${dot(end)})까지 휴가로 채워요(소집해제일도 <b>연가</b>로 포함). 출국일 <b>${fmtDate(dep)}</b>은 이 휴가구간 안이라 안전합니다(출국보다 <b>${freeBefore}근무일</b> 더 일찍 자유). 캘린더에 날짜별로 <b>연가/특별휴가</b>가 완전히 표기돼요.`
       : `⚠️ 휴가구간 시작(${fmtDate(bi.firstLeave)})이 출국일(${fmtDate(dep)})보다 늦어요. 연가+특별휴가가 부족해 출국 후~휴가시작 사이를 못 덮습니다. 잔여를 확인하세요.`}</div>`;
 }
 
@@ -562,7 +564,7 @@ function renderCalendar(){
     if(is===startIso) tags+=`<span class="cal-tag annual">복무시작</span>`;
     if(is===endIso) tags+=`<span class="cal-tag lv">소집해제</span>`;
     if(is===depIso) tags+=`<span class="cal-tag dep">✈️출국</span>`;
-    if(lvSet.has(is) && isWork(d) && is!==endIso){ const lt=labels[is]||"annual"; tags+=`<span class="cal-tag ${lt}">${lt==="annual"?"연가":"특별휴가"}</span>`; }
+    if(lvSet.has(is) && isWork(d)){ const lt=labels[is]||"annual"; tags+=`<span class="cal-tag ${lt}">${lt==="annual"?"연가":"특별휴가"}</span>`; }
     if(scSet.has(is)) tags+=`<span class="cal-tag scn">조퇴${activeScenario}h</span>`;
     (byDate[is]||[]).forEach(x=>{
       const txt=x.type==="sick"?`병가 ${x.hours}h`:x.type==="annual"?`연가`:`특별`;
@@ -605,10 +607,12 @@ function fillSettings(){
   $("#s-start").value=cfg.start; $("#s-end").value=cfg.end; $("#s-departure").value=cfg.departure; $("#s-hpd").value=cfg.hpd;
   $("#s-sick").value=cfg.sick; $("#s-annual").value=cfg.annual; $("#s-special").value=cfg.special;
   $("#s-sat").classList.toggle("on",!!cfg.sat); $("#s-sun").classList.toggle("on",!!cfg.sun);
+  $("#s-inclend").classList.toggle("on",!!cfg.inclEnd);
 }
 $("#btn-settings").onclick=()=>{ fillSettings(); openSheet("set"); };
 $("#s-sat").onclick=()=>$("#s-sat").classList.toggle("on");
 $("#s-sun").onclick=()=>$("#s-sun").classList.toggle("on");
+$("#s-inclend").onclick=()=>$("#s-inclend").classList.toggle("on");
 $("#s-save").onclick=()=>{
   const start=$("#s-start").value, end=$("#s-end").value, departure=$("#s-departure").value;
   if(!start||!end||parse(end)<=parse(start)){ toast("소집해제일이 시작일보다 뒤여야 해요"); return; }
@@ -618,7 +622,8 @@ $("#s-save").onclick=()=>{
     sick:Math.max(0,+$("#s-sick").value||0),
     annual:Math.max(0,+$("#s-annual").value||0),
     special:Math.max(0,+$("#s-special").value||0),
-    sat:$("#s-sat").classList.contains("on"), sun:$("#s-sun").classList.contains("on") };
+    sat:$("#s-sat").classList.contains("on"), sun:$("#s-sun").classList.contains("on"),
+    inclEnd:$("#s-inclend").classList.contains("on") };
   saveCfg(); closeSheet("set"); renderAll(); toast("저장했어요 ✓");
 };
 $("#s-reset").onclick=()=>{ if(confirm("설정을 기본값으로 되돌릴까요? (사용 기록은 유지)")){ cfg={...DEF}; saveCfg(); fillSettings(); renderAll(); toast("기본값으로 초기화했어요"); } };
